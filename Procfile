@@ -1,1 +1,1 @@
-web: python combined_bot.py
+web: python webhook_server_standalone.py
