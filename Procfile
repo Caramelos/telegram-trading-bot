@@ -1,1 +1,1 @@
-web: python webhook_server_standalone.py
+web: python webhook_server_clean.py

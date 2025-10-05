@@ -331,23 +331,6 @@ if __name__ == '__main__':
     logger.info(f"Features: User preferences, Enhanced bot, Menu system")
     
     app.run(host='0.0.0.0', port=port, debug=False)
-        return jsonify({"error": "Internal server error"}), 500
-
-@app.route('/test', methods=['POST', 'GET'])
-def test_endpoint():
-    """Test endpoint for manual signal testing"""
-    
-    # Sample test signal
-    test_signal = {
-        "secret": Config.WEBHOOK_SECRET,
-        "action": "BUY",
-        "symbol": "BTCUSD",
-        "price": "67500",
-        "strategy": "Test Signal",
-        "message": "This is a test signal from your webhook server"
-    }
-    
-    if request.method == 'POST':
         # Use provided data or test data
         data = request.get_json() if request.is_json else test_signal
     else:
