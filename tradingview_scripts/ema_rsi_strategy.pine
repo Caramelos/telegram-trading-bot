@@ -1,0 +1,49 @@
+//@version=5
+strategy("TradePods Auto Signal Bot", overlay=true, shorttitle="TradePods")
+
+// Input parameters for the strategy
+fast_length = input.int(9, "Fast EMA Length", minval=1)
+slow_length = input.int(21, "Slow EMA Length", minval=1)
+rsi_length = input.int(14, "RSI Length", minval=1)
+rsi_overbought = input.float(70, "RSI Overbought", minval=50, maxval=100)
+rsi_oversold = input.float(30, "RSI Oversold", minval=0, maxval=50)
+
+// Webhook configuration
+webhook_url = input.string("YOUR_WEBHOOK_URL_HERE", "Webhook URL")
+webhook_secret = input.string("tradepods_secret_2025", "Webhook Secret")
+
+// Calculate indicators
+fast_ema = ta.ema(close, fast_length)
+slow_ema = ta.ema(close, slow_length)
+rsi = ta.rsi(close, rsi_length)
+
+// Define buy and sell conditions
+buy_signal = ta.crossover(fast_ema, slow_ema) and rsi < rsi_overbought
+sell_signal = ta.crossunder(fast_ema, slow_ema) and rsi > rsi_oversold
+
+// Plot EMAs
+plot(fast_ema, color=color.blue, title="Fast EMA", linewidth=2)
+plot(slow_ema, color=color.red, title="Slow EMA", linewidth=2)
+
+// Plot buy/sell signals
+plotshape(buy_signal, title="Buy Signal", location=location.belowbar, style=shape.labelup, size=size.normal, color=color.green, text="BUY")
+plotshape(sell_signal, title="Sell Signal", location=location.abovebar, style=shape.labeldown, size=size.normal, color=color.red, text="SELL")
+
+// Strategy entries
+if buy_signal
+    strategy.entry("Long", strategy.long)
+    
+if sell_signal
+    strategy.close("Long")
+
+// Alert messages for webhook
+buy_message = '{"secret": "' + webhook_secret + '", "action": "BUY", "symbol": "' + syminfo.ticker + '", "price": "' + str.tostring(close) + '", "strategy": "EMA Cross + RSI", "exchange": "' + syminfo.exchange + '", "message": "Fast EMA crossed above Slow EMA with RSI confirmation", "timestamp": "' + str.tostring(timenow) + '"}'
+
+sell_message = '{"secret": "' + webhook_secret + '", "action": "SELL", "symbol": "' + syminfo.ticker + '", "price": "' + str.tostring(close) + '", "strategy": "EMA Cross + RSI", "exchange": "' + syminfo.exchange + '", "message": "Fast EMA crossed below Slow EMA with RSI confirmation", "timestamp": "' + str.tostring(timenow) + '"}'
+
+// Create alerts
+if buy_signal
+    alert(buy_message, alert.freq_once_per_bar)
+    
+if sell_signal
+    alert(sell_message, alert.freq_once_per_bar)

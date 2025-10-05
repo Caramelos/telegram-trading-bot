@@ -1,0 +1,85 @@
+//@version=5
+indicator("TradePods Simple Buy/Sell Alerts", overlay=true, shorttitle="TradePods Signals")
+
+// Webhook configuration inputs
+webhook_secret = input.string("tradepods_secret_2025", "Webhook Secret Key")
+
+// Strategy selection
+strategy_type = input.string("EMA Cross", "Signal Strategy", options=["EMA Cross", "RSI Levels", "MACD", "Support/Resistance"])
+
+// EMA Cross parameters
+fast_ema_length = input.int(9, "Fast EMA Length", minval=1)
+slow_ema_length = input.int(21, "Slow EMA Length", minval=1)
+
+// RSI parameters  
+rsi_length = input.int(14, "RSI Length", minval=1)
+rsi_buy_level = input.float(30, "RSI Buy Level", minval=0, maxval=50)
+rsi_sell_level = input.float(70, "RSI Sell Level", minval=50, maxval=100)
+
+// MACD parameters
+macd_fast = input.int(12, "MACD Fast Length", minval=1)
+macd_slow = input.int(26, "MACD Slow Length", minval=1)
+macd_signal = input.int(9, "MACD Signal Length", minval=1)
+
+// Calculate indicators
+fast_ema = ta.ema(close, fast_ema_length)
+slow_ema = ta.ema(close, slow_ema_length)
+rsi = ta.rsi(close, rsi_length)
+[macd_line, signal_line, _] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// Define conditions based on selected strategy
+var bool buy_condition = false
+var bool sell_condition = false
+
+if strategy_type == "EMA Cross"
+    buy_condition := ta.crossover(fast_ema, slow_ema)
+    sell_condition := ta.crossunder(fast_ema, slow_ema)
+    
+else if strategy_type == "RSI Levels"
+    buy_condition := ta.crossover(rsi, rsi_buy_level)
+    sell_condition := ta.crossunder(rsi, rsi_sell_level)
+    
+else if strategy_type == "MACD"
+    buy_condition := ta.crossover(macd_line, signal_line) and macd_line < 0
+    sell_condition := ta.crossunder(macd_line, signal_line) and macd_line > 0
+    
+else if strategy_type == "Support/Resistance"
+    // Simple support/resistance based on highs and lows
+    support = ta.lowest(low, 20)
+    resistance = ta.highest(high, 20)
+    buy_condition := close > resistance[1] and close[1] <= resistance[1]
+    sell_condition := close < support[1] and close[1] >= support[1]
+
+// Plot signals
+plotshape(buy_condition, title="BUY", location=location.belowbar, style=shape.triangleup, size=size.normal, color=color.lime, text="BUY")
+plotshape(sell_condition, title="SELL", location=location.abovebar, style=shape.triangledown, size=size.normal, color=color.red, text="SELL")
+
+// Create JSON messages for webhook
+buy_alert_message = '{"secret": "' + webhook_secret + 
+    '", "action": "BUY"' + 
+    ', "symbol": "' + syminfo.ticker + 
+    '", "price": "' + str.tostring(close, '#.##') + 
+    '", "strategy": "' + strategy_type + 
+    '", "exchange": "' + syminfo.exchange + 
+    '", "message": "Buy signal triggered on ' + timeframe.period + ' timeframe"' + 
+    ', "timestamp": "' + str.tostring(timenow) + '"}'
+
+sell_alert_message = '{"secret": "' + webhook_secret + 
+    '", "action": "SELL"' + 
+    ', "symbol": "' + syminfo.ticker + 
+    '", "price": "' + str.tostring(close, '#.##') + 
+    '", "strategy": "' + strategy_type + 
+    '", "exchange": "' + syminfo.exchange + 
+    '", "message": "Sell signal triggered on ' + timeframe.period + ' timeframe"' + 
+    ', "timestamp": "' + str.tostring(timenow) + '"}'
+
+// Trigger alerts
+if buy_condition
+    alert(buy_alert_message, alert.freq_once_per_bar)
+    
+if sell_condition
+    alert(sell_alert_message, alert.freq_once_per_bar)
+
+// Optional: Plot EMAs if EMA Cross strategy is selected
+plot(strategy_type == "EMA Cross" ? fast_ema : na, color=color.blue, title="Fast EMA", linewidth=1)
+plot(strategy_type == "EMA Cross" ? slow_ema : na, color=color.orange, title="Slow EMA", linewidth=1)

@@ -1,0 +1,63 @@
+//@version=5
+indicator("TradePods Watchlist Signals", overlay=true, shorttitle="TradePods")
+
+// ===== CONFIGURATION =====
+webhook_secret = input.string("tradepods_secret_2025", "Webhook Secret")
+strategy_name = input.string("Custom Strategy", "Strategy Name")
+
+// ===== SIMPLE MOVING AVERAGE STRATEGY =====
+fast_ma_length = input.int(9, "Fast MA Length", minval=1, maxval=200)
+slow_ma_length = input.int(21, "Slow MA Length", minval=1, maxval=200)
+use_rsi_filter = input.bool(true, "Use RSI Filter")
+rsi_length = input.int(14, "RSI Length", minval=2, maxval=50)
+rsi_oversold = input.float(30, "RSI Oversold Level", minval=20, maxval=40)
+rsi_overbought = input.float(70, "RSI Overbought Level", minval=60, maxval=80)
+
+// ===== CALCULATIONS =====
+fast_ma = ta.sma(close, fast_ma_length)
+slow_ma = ta.sma(close, slow_ma_length)
+rsi = ta.rsi(close, rsi_length)
+
+// ===== BUY/SELL CONDITIONS =====
+// Buy when fast MA crosses above slow MA (with optional RSI filter)
+buy_condition = ta.crossover(fast_ma, slow_ma) and (not use_rsi_filter or rsi < rsi_overbought)
+
+// Sell when fast MA crosses below slow MA (with optional RSI filter) 
+sell_condition = ta.crossunder(fast_ma, slow_ma) and (not use_rsi_filter or rsi > rsi_oversold)
+
+// ===== VISUAL SIGNALS =====
+plot(fast_ma, color=color.blue, title="Fast MA", linewidth=2)
+plot(slow_ma, color=color.red, title="Slow MA", linewidth=2)
+
+plotshape(buy_condition, title="BUY Signal", location=location.belowbar, style=shape.labelup, size=size.normal, color=color.green, text="BUY")
+plotshape(sell_condition, title="SELL Signal", location=location.abovebar, style=shape.labeldown, size=size.normal, color=color.red, text="SELL")
+
+// ===== WEBHOOK MESSAGES =====
+// BUY Alert Message
+buy_message = '{"secret": "' + webhook_secret + 
+    '", "action": "BUY"' +
+    ', "symbol": "' + syminfo.ticker + 
+    '", "price": "' + str.tostring(close, format.mintick) + 
+    '", "strategy": "' + strategy_name + 
+    '", "exchange": "' + syminfo.exchange + 
+    '", "message": "Fast MA(' + str.tostring(fast_ma_length) + ') crossed above Slow MA(' + str.tostring(slow_ma_length) + ')"' +
+    ', "timestamp": "' + str.tostring(timenow) + 
+    '", "rsi": "' + str.tostring(rsi, '#.##') + '"}'
+
+// SELL Alert Message  
+sell_message = '{"secret": "' + webhook_secret + 
+    '", "action": "SELL"' +
+    ', "symbol": "' + syminfo.ticker + 
+    '", "price": "' + str.tostring(close, format.mintick) + 
+    '", "strategy": "' + strategy_name + 
+    '", "exchange": "' + syminfo.exchange + 
+    '", "message": "Fast MA(' + str.tostring(fast_ma_length) + ') crossed below Slow MA(' + str.tostring(slow_ma_length) + ')"' +
+    ', "timestamp": "' + str.tostring(timenow) + 
+    '", "rsi": "' + str.tostring(rsi, '#.##') + '"}'
+
+// ===== ALERTS =====
+if buy_condition
+    alert(buy_message, alert.freq_once_per_bar)
+    
+if sell_condition
+    alert(sell_message, alert.freq_once_per_bar)
