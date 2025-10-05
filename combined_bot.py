@@ -4,10 +4,12 @@ import logging
 import json
 import os
 import random
+import threading
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import requests
+from flask import Flask, request, jsonify
 from config import Config
 
 # Configure logging
@@ -16,6 +18,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Flask app for webhook
+app = Flask(__name__)
 
 # User state storage (in production, use a database)
 user_states = {}
@@ -63,6 +68,9 @@ ACTIVE_STRATEGIES = {
         "description": "RSI divergence detection for ADA"
     }
 }
+
+# Global telegram application variable
+telegram_app = None
 
 class UserState:
     def __init__(self, user_id):
@@ -137,6 +145,7 @@ def create_settings_menu():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# Telegram Bot Functions
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
     user = update.effective_user
@@ -152,6 +161,7 @@ Hello {user.first_name}! Your trading signal bot is ready.
 📊 Show live BTC prices  
 📈 Track your trading signals
 ⚙️ Customizable notifications
+😂 Tell you trading jokes!
 
 **Your Chat ID:** `{user.id}`
 
@@ -171,27 +181,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=create_main_menu(),
         parse_mode='Markdown'
     )
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command"""
-    user_state = get_user_state(update.effective_user.id)
-    
-    status_text = f"""
-📊 **Bot Status**
-
-🤖 **System:** Online ✅
-🔔 **Notifications:** {'✅ Enabled' if user_state.notifications_enabled else '❌ Disabled'}
-📈 **Price Alerts:** {'✅ Enabled' if user_state.price_alerts_enabled else '❌ Disabled'}
-🎯 **Signal Alerts:** {'✅ Enabled' if user_state.signal_alerts_enabled else '❌ Disabled'}
-
-🌐 **Webhook:** Active
-🔗 **TradingView:** Connected
-⏰ **Last Update:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-💡 Use /menu to access controls
-    """
-    
-    await update.message.reply_text(status_text, parse_mode='Markdown')
 
 async def get_btc_price():
     """Fetch current BTC price from a public API"""
@@ -275,25 +264,6 @@ Here are your active TradingView strategies:
             parse_mode='Markdown'
         )
     
-    elif data == "menu_notifications":
-        text = f"""
-🔔 **Notification Settings**
-
-Control what alerts you receive:
-
-🟢 = Enabled  🔴 = Disabled
-
-Current Status:
-• All Notifications: {'🟢 ON' if user_state.notifications_enabled else '🔴 OFF'}
-• Price Alerts: {'🟢 ON' if user_state.price_alerts_enabled else '🔴 OFF'}  
-• Trading Signals: {'🟢 ON' if user_state.signal_alerts_enabled else '🔴 OFF'}
-        """
-        await query.edit_message_text(
-            text,
-            reply_markup=create_notifications_menu(user_state),
-            parse_mode='Markdown'
-        )
-    
     elif data == "menu_price":
         btc_price = await get_btc_price()
         if btc_price:
@@ -333,54 +303,6 @@ Current Status:
             parse_mode='Markdown'
         )
     
-    elif data == "menu_settings":
-        text = """
-⚙️ **Settings**
-
-Customize your trading bot experience:
-
-🎯 **Alert Frequency** - How often you get updates
-💰 **Price Thresholds** - Set price alert levels  
-📱 **Message Format** - Customize alert appearance
-🔒 **Security** - Webhook and authentication settings
-        """
-        await query.edit_message_text(
-            text,
-            reply_markup=create_settings_menu(),
-            parse_mode='Markdown'
-        )
-    
-    elif data == "menu_status":
-        await status_command(query, context)
-        
-    elif data == "menu_help":
-        text = """
-ℹ️ **Help & Commands**
-
-**Available Commands:**
-• `/start` - Welcome message and setup
-• `/menu` - Show main menu
-• `/status` - Check bot status
-• `/help` - Show this help message
-
-**How to Connect TradingView:**
-1. Create alert in TradingView
-2. Set webhook URL: `https://web-production-ae76.up.railway.app/webhook`
-3. Use this message format:
-```
-{"secret":"tradepods_secret_2025","action":"{{strategy.order.action}}","symbol":"{{ticker}}","price":"{{close}}","strategy":"Your Strategy"}
-```
-
-**Need Support?**
-Contact the bot administrator or check documentation.
-        """
-        keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_main")]]
-        await query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-    
     elif data == "menu_test":
         text = """
 🧪 **Test Signal Sent!**
@@ -388,9 +310,6 @@ Contact the bot administrator or check documentation.
 A test trading signal has been sent to demonstrate the format.
 
 If you received a test message, your bot is working correctly!
-
-You can also test by visiting:
-`https://web-production-ae76.up.railway.app/test`
         """
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="back_to_main")]]
         await query.edit_message_text(
@@ -414,57 +333,17 @@ You can also test by visiting:
         """
         await context.bot.send_message(chat_id=user_id, text=test_signal, parse_mode='Markdown')
     
-    elif data == "toggle_all_notifications":
-        user_state.notifications_enabled = not user_state.notifications_enabled
-        status = "enabled" if user_state.notifications_enabled else "disabled"
-        
-        await query.edit_message_text(
-            f"🔔 All notifications have been **{status}**",
-            reply_markup=create_notifications_menu(user_state),
-            parse_mode='Markdown'
-        )
-    
-    elif data == "toggle_price_alerts":
-        user_state.price_alerts_enabled = not user_state.price_alerts_enabled
-        status = "enabled" if user_state.price_alerts_enabled else "disabled"
-        
-        await query.edit_message_text(
-            f"📊 Price alerts have been **{status}**",
-            reply_markup=create_notifications_menu(user_state),
-            parse_mode='Markdown'
-        )
-    
-    elif data == "toggle_signal_alerts":
-        user_state.signal_alerts_enabled = not user_state.signal_alerts_enabled
-        status = "enabled" if user_state.signal_alerts_enabled else "disabled"
-        
-        await query.edit_message_text(
-            f"📈 Trading signal alerts have been **{status}**",
-            reply_markup=create_notifications_menu(user_state),
-            parse_mode='Markdown'
-        )
-    
     elif data == "back_to_main":
         await query.edit_message_text(
             "🎛️ **Main Menu**\n\nChoose an option:",
             reply_markup=create_main_menu(),
             parse_mode='Markdown'
         )
-    
-    # Settings callbacks
-    elif data.startswith("settings_"):
-        setting = data.replace("settings_", "")
-        text = f"⚙️ **{setting.title()} Settings**\n\nThis feature is coming soon!"
-        keyboard = [[InlineKeyboardButton("⬅️ Back to Settings", callback_data="menu_settings")]]
-        await query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
 
-def should_send_message(user_id, message_type="signal"):
+# Flask webhook endpoints
+def should_send_message(chat_id, message_type="signal"):
     """Check if user wants to receive this type of message"""
-    user_state = get_user_state(user_id)
+    user_state = get_user_state(chat_id)
     
     if not user_state.notifications_enabled:
         return False
@@ -477,33 +356,142 @@ def should_send_message(user_id, message_type="signal"):
     
     return True
 
-async def main():
-    """Main function to run the bot"""
+def send_telegram_message_sync(chat_id, message, message_type="signal"):
+    """Send message to Telegram using the bot"""
+    global telegram_app
+    
+    if not should_send_message(chat_id, message_type):
+        logger.info(f"Message blocked by user preferences for chat {chat_id}")
+        return True
+    
+    if telegram_app:
+        # Schedule the message to be sent
+        asyncio.create_task(telegram_app.bot.send_message(
+            chat_id=chat_id, 
+            text=message, 
+            parse_mode='HTML'
+        ))
+        return True
+    return False
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Receive TradingView webhook alerts"""
+    try:
+        data = request.get_json()
+        logger.info(f"Received webhook: {json.dumps(data, indent=2)}")
+        
+        # Verify webhook secret
+        if Config.WEBHOOK_SECRET and Config.WEBHOOK_SECRET != "default_secret":
+            received_secret = data.get('secret')
+            if received_secret != Config.WEBHOOK_SECRET:
+                return jsonify({"error": "Invalid secret"}), 401
+        
+        # Format the signal message
+        action = data.get('action', '').upper()
+        symbol = data.get('symbol', data.get('ticker', 'Unknown'))
+        price = data.get('price', data.get('close', 'N/A'))
+        strategy = data.get('strategy', data.get('indicator', 'Manual Alert'))
+        message = data.get('message', data.get('comment', ''))
+        
+        if ':' in symbol:
+            symbol = symbol.split(':')[-1]
+        
+        emoji = '💰📊' if action in ['PRICE_UPDATE', 'PRICE_MOVEMENT'] else '🟢📈' if action in ['BUY', 'LONG'] else '🔴📉' if action in ['SELL', 'SHORT'] else '🔔'
+        
+        formatted_message = f"""
+{emoji} <b>TRADING SIGNAL</b>
+
+📊 <b>Symbol:</b> {symbol}
+🎯 <b>Action:</b> {action}
+💰 <b>Price:</b> ${price}
+📈 <b>Strategy:</b> {strategy}
+
+{'📝 <b>Details:</b> ' + message if message else ''}
+
+⏰ <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+💡 <i>Use /menu to control notifications</i>
+        """
+        
+        # Send to allowed chat IDs
+        message_type = "price" if action in ['PRICE_UPDATE', 'PRICE_MOVEMENT'] else "signal"
+        sent_count = 0
+        
+        for chat_id in Config.ALLOWED_CHAT_IDS:
+            if send_telegram_message_sync(chat_id, formatted_message, message_type):
+                sent_count += 1
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Signal sent to {sent_count} chats",
+            "symbol": symbol
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "3.0 Combined Bot + Webhook",
+        "features": {
+            "telegram_bot": True,
+            "webhook_server": True,
+            "user_preferences": True,
+            "strategy_display": True,
+            "joke_bot": True
+        }
+    })
+
+async def setup_telegram_bot():
+    """Set up the Telegram bot"""
+    global telegram_app
+    
     # Create application
-    application = Application.builder().token(Config.BOT_TOKEN).build()
+    telegram_app = Application.builder().token(Config.BOT_TOKEN).build()
     
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("menu", menu_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("help", menu_command))
+    # Add handlers
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(CommandHandler("menu", menu_command))
+    telegram_app.add_handler(CallbackQueryHandler(button_callback))
     
-    # Add callback query handler for buttons
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Set bot commands for menu
+    # Set bot commands
     commands = [
         BotCommand("start", "Start the bot and show welcome message"),
         BotCommand("menu", "Show the main menu"),
-        BotCommand("status", "Check bot status"),
-        BotCommand("help", "Show help information"),
     ]
+    await telegram_app.bot.set_my_commands(commands)
     
-    await application.bot.set_my_commands(commands)
+    logger.info("Telegram bot setup complete")
+    return telegram_app
+
+def run_flask_app():
+    """Run the Flask webhook server"""
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"Starting Flask webhook server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+async def run_telegram_bot():
+    """Run the Telegram bot"""
+    logger.info("Starting Telegram bot...")
+    await telegram_app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+async def main():
+    """Main function to run both Flask and Telegram bot"""
+    # Setup Telegram bot
+    await setup_telegram_bot()
     
-    # Start the bot
-    logger.info("Enhanced TradePods Bot starting...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=run_flask_app, daemon=True)
+    flask_thread.start()
+    
+    # Run Telegram bot
+    await run_telegram_bot()
 
 if __name__ == '__main__':
     asyncio.run(main())
