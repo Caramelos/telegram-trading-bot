@@ -87,20 +87,24 @@ def should_process_signal(data):
     if ':' in symbol:
         symbol = symbol.split(':')[-1]
     
-    # Check allowed tokens filter
-    if Config.ALLOWED_TOKENS:
+    # Check allowed tokens filter (only if tokens are specified)
+    if Config.ALLOWED_TOKENS and any(token.strip() for token in Config.ALLOWED_TOKENS):
         allowed_upper = [token.upper().strip() for token in Config.ALLOWED_TOKENS if token.strip()]
         if symbol.upper() not in allowed_upper:
             logger.info(f"Symbol {symbol} not in allowed tokens: {allowed_upper}")
             return False
+    else:
+        logger.info(f"No token filter configured - accepting all tokens including {symbol}")
     
-    # Check allowed strategies filter  
+    # Check allowed strategies filter (only if strategies are specified)
     strategy = data.get('strategy', data.get('indicator', ''))
-    if Config.ALLOWED_STRATEGIES and strategy:
+    if Config.ALLOWED_STRATEGIES and any(strat.strip() for strat in Config.ALLOWED_STRATEGIES):
         allowed_strategies_upper = [s.upper().strip() for s in Config.ALLOWED_STRATEGIES if s.strip()]
         if strategy.upper() not in allowed_strategies_upper:
             logger.info(f"Strategy {strategy} not in allowed strategies: {allowed_strategies_upper}")
             return False
+    else:
+        logger.info(f"No strategy filter configured - accepting all strategies including '{strategy}'")
     
     return True
 
